@@ -5,7 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
 from torchvision.ops import DeformConv2d
-from ultralytics import YOLO
+#from ultralytics import YOLO
 import pdb
 
 # ✅ CUDA 강제 비활성화 (GPU 사용 금지)
