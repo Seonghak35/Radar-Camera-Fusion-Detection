@@ -5,6 +5,9 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
 from torchvision.ops import DeformConv2d
+import pandas as pd
+from PIL import Image
+import torchvision.transforms as transforms
 #from ultralytics import YOLO
 import pdb
 
@@ -79,36 +82,97 @@ class ShuffleAttention(nn.Module):
         return x * channel_att * spatial_att
     
 
-# ✅ WaterScenes와 동일한 차원의 Dummy Dataset 생성
-class DummyRadarCameraYoloDataset(Dataset):
-    def __init__(self, num_samples=100, input_shape=(160, 160), num_classes=7):
-        self.num_samples = num_samples
+# # ✅ WaterScenes와 동일한 차원의 Dummy Dataset 생성
+# class DummyRadarCameraYoloDataset(Dataset):
+#     def __init__(self, num_samples=100, input_shape=(160, 160), num_classes=7):
+#         self.num_samples = num_samples
+#         self.input_shape = input_shape
+#         self.num_classes = num_classes
+
+#     def __len__(self):
+#         return self.num_samples
+
+#     def __getitem__(self, idx):
+#         # Image data (RGB)
+#         camera = torch.rand((3, *self.input_shape))
+
+#         # Radar REVP Map 생성 (R, E, V, P 4 channel)
+#         range_map = torch.rand((1, *self.input_shape)) * 100  # 거리 (0~100m)
+#         elevation_map = torch.rand((1, *self.input_shape)) * 180  # 고도각 (0~180도)
+#         velocity_map = torch.randn((1, *self.input_shape))  # 속도 (-x~+x)
+#         power_map = torch.rand((1, *self.input_shape)) * 50  # 반사 신호 강도
+
+#         radar_revp = torch.cat((range_map, elevation_map, velocity_map, power_map), dim=0)  # (4, H, W)
+
+#         # YOLO-format Bounding Box (M, 5) [class_id, x, y, w, h]
+#         M = np.random.randint(1, 10)  # 임의의 객체 개수 (1~10)
+#         labels = torch.zeros((M, 5))  # (M, 5) Tensor
+
+#         labels[:, 0] = torch.randint(0, self.num_classes, (M,))  # 클래스 ID (정수)
+#         labels[:, 1:] = torch.rand((M, 4))  # x_center, y_center, width, height (0~1 범위)
+        
+#         return camera, radar_revp, labels
+    
+# ✅ WaterScenes 데이터셋 클래스
+class RadarCameraYoloDataset(Dataset):
+    def __init__(self, data_root="/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/data/",
+                 input_shape=(160, 160), num_classes=7, transform=None):
+        """
+        WaterScenes DataLoader
+
+        :param data_root: 데이터가 저장된 루트 디렉토리
+        :param input_shape: 이미지 및 레이더 데이터의 크기
+        :param num_classes: 객체 탐지 클래스 개수
+        :param transform: 이미지 변환을 위한 torchvision.transforms
+        """
+        self.data_root = data_root
+        self.image_dir = os.path.join(data_root, "image")
+        self.radar_dir = os.path.join(data_root, "radar/REVP_map")
+        self.label_dir = os.path.join(data_root, "detection")
+
         self.input_shape = input_shape
         self.num_classes = num_classes
+        self.transform = transform if transform else transforms.Compose([
+            transforms.Resize(input_shape),
+            transforms.ToTensor()
+        ])
+
+        # 이미지 파일 리스트 가져오기
+        self.image_files = sorted([f for f in os.listdir(self.image_dir) if f.endswith('.jpg')])
 
     def __len__(self):
-        return self.num_samples
+        return len(self.image_files)
 
     def __getitem__(self, idx):
-        # Image data (RGB)
-        camera = torch.rand((3, *self.input_shape))
+        # 파일명 가져오기 (확장자 제외)
+        file_name = os.path.splitext(self.image_files[idx])[0]
 
-        # Radar REVP Map 생성 (R, E, V, P 4 channel)
-        range_map = torch.rand((1, *self.input_shape)) * 100  # 거리 (0~100m)
-        elevation_map = torch.rand((1, *self.input_shape)) * 180  # 고도각 (0~180도)
-        velocity_map = torch.randn((1, *self.input_shape))  # 속도 (-x~+x)
-        power_map = torch.rand((1, *self.input_shape)) * 50  # 반사 신호 강도
+        # 1️⃣ 이미지 불러오기 (RGB)
+        image_path = os.path.join(self.image_dir, file_name + ".jpg")
+        image = Image.open(image_path).convert("RGB")
+        image = self.transform(image)  # (3, H, W)
 
-        radar_revp = torch.cat((range_map, elevation_map, velocity_map, power_map), dim=0)  # (4, H, W)
+        # 2️⃣ 레이더 REVP 데이터 불러오기 (.npz)
+        radar_path = os.path.join(self.radar_dir, file_name + ".npz")
+        radar_data = np.load(radar_path)['arr_0']  # (4, H, W) → REVP 맵
+        radar_revp = torch.tensor(radar_data, dtype=torch.float32)
 
-        # YOLO-format Bounding Box (M, 5) [class_id, x, y, w, h]
-        M = np.random.randint(1, 10)  # 임의의 객체 개수 (1~10)
-        labels = torch.zeros((M, 5))  # (M, 5) Tensor
+        # 3️⃣ 라벨 불러오기 (.txt)
+        label_path = os.path.join(self.label_dir, file_name + ".txt")
+        labels = []
+        if os.path.exists(label_path):
+            with open(label_path, "r") as f:
+                for line in f.readlines():
+                    values = list(map(float, line.strip().split()))
+                    labels.append(values)
 
-        labels[:, 0] = torch.randint(0, self.num_classes, (M,))  # 클래스 ID (정수)
-        labels[:, 1:] = torch.rand((M, 4))  # x_center, y_center, width, height (0~1 범위)
+        # YOLO 형식 라벨을 Tensor로 변환 (M, 5) → [class_id, x_center, y_center, width, height]
+        if len(labels) > 0:
+            labels = torch.tensor(labels, dtype=torch.float32)
+        else:
+            labels = torch.zeros((0, 5), dtype=torch.float32)  # 객체 없는 경우 빈 Tensor
 
-        return camera, radar_revp, labels
+        return image, radar_revp, labels
     
 
 class RadarCameraYOLO(nn.Module):
@@ -221,7 +285,8 @@ def yolo_collate_fn(batch):
 # ✅ 모델, 데이터 로더 설정
 num_classes = 7
 model = RadarCameraYOLO(num_classes=num_classes).to(device)
-dataset = DummyRadarCameraYoloDataset(num_samples=1000)
+# dataset = DummyRadarCameraYoloDataset(num_samples=1000)
+dataset = RadarCameraYoloDataset()
 dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
 
 # ✅ 손실 함수 및 최적화 설정
