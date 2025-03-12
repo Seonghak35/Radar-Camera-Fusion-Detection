@@ -49,7 +49,7 @@ def create_dummy_label(file_path, num_objects=5):
             f.write(f"{class_id} {x_center} {y_center} {width} {height}\n")
 
 # ✅ 데이터셋 개수 설정
-num_samples = 1000
+num_samples = 50
 
 # ✅ 더미 데이터 생성
 for i in range(num_samples):
