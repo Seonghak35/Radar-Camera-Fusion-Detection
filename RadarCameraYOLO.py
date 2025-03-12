@@ -8,7 +8,7 @@ from torchvision.ops import DeformConv2d
 import pandas as pd
 from PIL import Image
 import torchvision.transforms as transforms
-#from ultralytics import YOLO
+#from ultralytics import YOLO # for this, the ultralytics have to be installed.
 import pdb
 
 # ✅ CUDA 강제 비활성화 (GPU 사용 금지)
@@ -287,20 +287,30 @@ num_classes = 7
 model = RadarCameraYOLO(num_classes=num_classes).to(device)
 # dataset = DummyRadarCameraYoloDataset(num_samples=1000)
 dataset = RadarCameraYoloDataset()
-dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
+
+train_size = int(0.7 * len(dataset))
+val_size = len(dataset) - train_size
+train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+
+
+train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
+val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=1, collate_fn=yolo_collate_fn)
 
 # ✅ 손실 함수 및 최적화 설정
 cls_criterion = nn.CrossEntropyLoss() 
 bbox_criterion = nn.SmoothL1Loss()  
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# ✅ 학습 루프
+# ✅ 학습 및 검증 루프
 num_epochs = 5
 print("🚀 Training started!")
+
 for epoch in range(num_epochs):
-    for i, (camera, radar, labels) in enumerate(dataloader):
-        camera = camera.to(device)
-        radar = radar.to(device)
+
+    # ✅ 학습 (Training)
+    model.train()
+    for i, (camera, radar, labels) in enumerate(train_loader):
+        camera, radar = camera.to(device), radar.to(device)
 
         class_output, bbox_output = model(camera, radar) # Model output
 
@@ -339,8 +349,38 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
 
-        if i % 10 == 0:
-            print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i}/{len(dataloader)}], Class Loss: {cls_loss.item():.4f}, BBox Loss: {bbox_loss.item():.4f}, Total Loss: {loss.item():.4f}")
+        if i % 5 == 0:
+            print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i}/{len(train_loader)}], Class Loss: {cls_loss.item():.4f}, BBox Loss: {bbox_loss.item():.4f}, Total Loss: {loss.item():.4f}")
 
     print(f"✅ Epoch {epoch+1} completed.")
+
+
+    # ✅ 검증 (Validation)
+    model.eval()
+    total_cls_loss, total_bbox_loss = 0, 0
+    with torch.no_grad():
+        for camera, radar, labels in val_loader:
+            camera, radar = camera.to(device), radar.to(device)
+
+            class_output, bbox_output = model(camera, radar)
+
+            target_classes_map = torch.zeros((class_output.size(0), class_output.size(2), class_output.size(3))).long().to(device)
+            target_bboxes_map = torch.zeros_like(bbox_output).to(device)
+
+            for b, label in enumerate(labels):
+                for obj in label:
+                    x_idx = int(obj[1] * class_output.size(2))
+                    y_idx = int(obj[2] * class_output.size(3))
+                    target_classes_map[b, y_idx, x_idx] = int(obj[0])
+                    target_bboxes_map[b, :, y_idx, x_idx] = obj[1:]
+
+            cls_loss = cls_criterion(class_output.view(class_output.size(0), class_output.size(1), -1),
+                                     target_classes_map.view(class_output.size(0), -1))
+            bbox_loss = bbox_criterion(bbox_output, target_bboxes_map)
+
+            total_cls_loss += cls_loss.item()
+            total_bbox_loss += bbox_loss.item()
+
+    print(f"✅ Validation - Epoch {epoch+1}, Class Loss: {total_cls_loss/len(val_loader):.4f}, BBox Loss: {total_bbox_loss/len(val_loader):.4f}")
+
 print("✅ Training Completed!")
