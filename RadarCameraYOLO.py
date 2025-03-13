@@ -285,12 +285,13 @@ def yolo_collate_fn(batch):
 
 # ✅ 모델, 데이터 로더 설정
 num_classes = 7
+split_ratio = 0.7
 model = RadarCameraYOLO(num_classes=num_classes).to(device)
 # dataset = DummyRadarCameraYoloDataset(num_samples=1000)
 # dataset = RadarCameraYoloDataset()
-dataset = RadarCameraYoloDataset(data_root="/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/sample_dataset")
+dataset = RadarCameraYoloDataset(data_root="/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/sample_dataset") # Revised by songhee-cho
 
-train_size = int(0.7 * len(dataset))
+train_size = int(split_ratio * len(dataset))
 val_size = len(dataset) - train_size
 train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
