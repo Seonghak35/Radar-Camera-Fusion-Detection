@@ -10,6 +10,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 #from ultralytics import YOLO # for this, the ultralytics have to be installed.
 import pdb
+from WaterScenes.radar_map_generate import RESOLUTION # Revised by songhee-cho
 
 # ✅ CUDA 강제 비활성화 (GPU 사용 금지)
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
@@ -116,7 +117,7 @@ class ShuffleAttention(nn.Module):
 # ✅ WaterScenes 데이터셋 클래스
 class RadarCameraYoloDataset(Dataset):
     def __init__(self, data_root="/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/data/",
-                 input_shape=(160, 160), num_classes=7, transform=None):
+                 input_shape=(RESOLUTION, RESOLUTION), num_classes=7, transform=None):
         """
         WaterScenes DataLoader
 
@@ -286,13 +287,12 @@ def yolo_collate_fn(batch):
 num_classes = 7
 model = RadarCameraYOLO(num_classes=num_classes).to(device)
 # dataset = DummyRadarCameraYoloDataset(num_samples=1000)
-dataset = RadarCameraYoloDataset()
+# dataset = RadarCameraYoloDataset()
+dataset = RadarCameraYoloDataset(data_root="/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/sample_dataset")
 
 train_size = int(0.7 * len(dataset))
 val_size = len(dataset) - train_size
 train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-
-
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
 val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=1, collate_fn=yolo_collate_fn)
 

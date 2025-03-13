@@ -8,8 +8,12 @@ from dataset import WaterScenesDataset
 device = torch.device("cpu")
 
 # ✅ 데이터 로드 (Fusion 데이터셋 사용)
-dataset = WaterScenesDataset()
+# --------- Revised by songhee-cho --------- #
+# dataset = WaterScenesDataset()
+dataset = WaterScenesDataset(dataset_path='sample_dataset')
+# print(f"dataset done")
 dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=0)
+# print(f"dataloader done")
 
 # ✅ YOLO 모델 정의 (7채널 입력 지원)
 class YOLOv8Fusion(nn.Module):
@@ -28,6 +32,7 @@ class YOLOv8Fusion(nn.Module):
 # ✅ 모델 및 손실 함수 설정
 model = YOLOv8Fusion().to(device)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
+num_epochs = 5 # Revised by songhee-cho
 
 # ✅ IoU 계산 함수
 def compute_iou(pred_box, true_box):
@@ -37,6 +42,8 @@ def compute_iou(pred_box, true_box):
     # (x, y, w, h) 형식
     x1_pred, y1_pred, w_pred, h_pred = pred_box[:, 0], pred_box[:, 1], pred_box[:, 2], pred_box[:, 3]
     x1_true, y1_true, w_true, h_true = true_box[:, 0], true_box[:, 1], true_box[:, 2], true_box[:, 3]
+    print(f"x1_pred shape: {x1_pred.shape}")
+    print(f"x1_true shape: {x1_true.shape}")
 
     # 좌표 계산
     x2_pred, y2_pred = x1_pred + w_pred, y1_pred + h_pred
@@ -86,8 +93,11 @@ def yolo_loss(outputs, labels):
     return loss / len(labels)
 
 # ✅ 학습 루프
-for epoch in range(5):
-    for fused_input, labels in dataloader:
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        fused_input, labels  = batch
+        print(f"fused_input shape: {fused_input.shape}") # --------- Revised by songhee-cho --------- #
+        print(f"labels: {labels.shape}")
         fused_input = fused_input.to(device)
 
         # ✅ Forward Pass

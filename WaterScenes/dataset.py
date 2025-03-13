@@ -3,18 +3,22 @@ import torch
 import pandas as pd
 import numpy as np
 from torch.utils.data import Dataset
+from radar_map_generate import RESOLUTION
 from PIL import Image
 import torchvision.transforms as transforms
 
+
+# --------- Revised by songhee-cho: num_sample @ class WaterScenesDataset--------- #
 class WaterScenesDataset(Dataset):
-    def __init__(self, dataset_path='data', input_size=(640, 640), num_classes=7):
+    def __init__(self, dataset_path='data', input_size=(RESOLUTION, RESOLUTION), num_classes=7, num_sample=10):
         self.dataset_path = dataset_path
         self.input_size = input_size
         self.num_classes = num_classes
+        self.num_sample = num_sample
 
-        self.image_files = sorted(os.listdir(os.path.join(dataset_path, 'image')))
-        self.radar_files = sorted(os.listdir(os.path.join(dataset_path, 'radar')))
-        self.label_files = sorted(os.listdir(os.path.join(dataset_path, 'detection')))
+        self.image_files = sorted(os.listdir(os.path.join(dataset_path, 'image')))[:self.num_sample]
+        self.radar_files = sorted(os.listdir(os.path.join(dataset_path, 'radar')))[:self.num_sample]
+        self.label_files = sorted(os.listdir(os.path.join(dataset_path, 'detection')))[:self.num_sample]
 
         self.transform = transforms.Compose([
             transforms.Resize(self.input_size),
@@ -47,20 +51,24 @@ class WaterScenesDataset(Dataset):
         return torch.tensor(boxes, dtype=torch.float32)
 
     def __getitem__(self, idx):
+        MAX_BOXES = 10
         # ✅ 이미지 로드
         img_path = os.path.join(self.dataset_path, 'image', self.image_files[idx])
         image = Image.open(img_path).convert('RGB')
         image = self.transform(image)
+        #print(f"image shape: {image.shape}") # Revised by songhee-cho
 
         # ✅ 레이더 데이터 로드
         radar_path = os.path.join(self.dataset_path, 'radar', self.radar_files[idx])
         radar_revp = self.load_radar_data(radar_path)
+        #print(f"radar_revp shape: {radar_revp.shape}") # Revised by songhee-cho
 
         # ✅ 바운딩 박스 (YOLO 형식)
         label_path = os.path.join(self.dataset_path, 'detection', self.label_files[idx])
         labels = self.load_labels(label_path)
 
         # ✅ 이미지 + 레이더 Fusion (7채널 입력)
-        fused_input = torch.cat((image, radar_revp), dim=0)
+        fused_input = (torch.cat((image, radar_revp), dim=0)) # C*H*W
+
 
         return fused_input, labels
