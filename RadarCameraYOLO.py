@@ -116,7 +116,7 @@ class ShuffleAttention(nn.Module):
     
 # ✅ WaterScenes 데이터셋 클래스
 class RadarCameraYoloDataset(Dataset):
-    def __init__(self, data_root="/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/data/",
+    def __init__(self, data_root="/SSD/guest/teahyeon/Radar-Camera-Fusion-Detection/WaterScenes/data/",
                  input_shape=(RESOLUTION, RESOLUTION), num_classes=7, transform=None):
         """
         WaterScenes DataLoader
@@ -282,6 +282,89 @@ def yolo_collate_fn(batch):
     return cameras, radars, labels  # ✅ `labels`은 리스트로 유지
 
 
+# ✅ IoU (Intersection over Union) 계산 함수
+def compute_iou(box1, box2):
+    """
+    box1, box2: [x_center, y_center, width, height]
+    """
+    box1_x1 = box1[0] - box1[2] / 2
+    box1_y1 = box1[1] - box1[3] / 2
+    box1_x2 = box1[0] + box1[2] / 2
+    box1_y2 = box1[1] + box1[3] / 2
+
+    box2_x1 = box2[0] - box2[2] / 2
+    box2_y1 = box2[1] - box2[3] / 2
+    box2_x2 = box2[0] + box2[2] / 2
+    box2_y2 = box2[1] + box2[3] / 2
+
+    inter_x1 = max(box1_x1, box2_x1)
+    inter_y1 = max(box1_y1, box2_y1)
+    inter_x2 = min(box1_x2, box2_x2)
+    inter_y2 = min(box1_y2, box2_y2)
+
+    inter_area = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
+    box1_area = (box1_x2 - box1_x1) * (box1_y2 - box1_y1)
+    box2_area = (box2_x2 - box2_x1) * (box2_y2 - box2_y1)
+    union_area = box1_area + box2_area - inter_area
+
+    return inter_area / union_area if union_area > 0 else 0
+
+
+# ✅ Precision-Recall 곡선 기반 AP 계산
+def compute_ap(precision, recall):
+    recall = np.concatenate(([0.0], recall, [1.0]))
+    precision = np.concatenate(([0.0], precision, [0.0]))
+
+    for i in range(len(precision) - 1, 0, -1):
+        precision[i - 1] = max(precision[i - 1], precision[i])
+
+    indices = np.where(recall[1:] != recall[:-1])[0]
+    ap = np.sum((recall[indices + 1] - recall[indices]) * precision[indices + 1])
+
+    return ap
+
+
+# ✅ mAP (Mean Average Precision) 계산 함수 (Confidence Score 추가)
+def compute_map(predictions, ground_truths, iou_threshold=0.5, confidence_threshold=0.3):
+    aps = []
+    for class_id in range(num_classes):
+        gt_boxes = [gt[1:] for gt in ground_truths if gt[0] == class_id]
+        pred_boxes = [pred[1:] for pred in predictions if pred[0] == class_id and pred[-1] > confidence_threshold]
+
+        if len(gt_boxes) == 0 or len(pred_boxes) == 0:
+            continue
+
+        pred_boxes = sorted(pred_boxes, key=lambda x: x[-1], reverse=True)  # Confidence 기준 정렬
+
+        tp, fp = np.zeros(len(pred_boxes)), np.zeros(len(pred_boxes))
+        matched_gt = set()
+
+        for i, pred in enumerate(pred_boxes):
+            best_iou = 0
+            best_gt_idx = -1
+            for j, gt in enumerate(gt_boxes):
+                iou = compute_iou(pred, gt)
+                if iou > best_iou and j not in matched_gt:
+                    best_iou = iou
+                    best_gt_idx = j
+
+            if best_iou >= iou_threshold:
+                tp[i] = 1
+                matched_gt.add(best_gt_idx)
+            else:
+                fp[i] = 1
+
+        tp_cumsum = np.cumsum(tp)
+        fp_cumsum = np.cumsum(fp)
+
+        recall = tp_cumsum / len(gt_boxes)
+        precision = tp_cumsum / (tp_cumsum + fp_cumsum + 1e-6)
+
+        ap = compute_ap(precision, recall)
+        aps.append(ap)
+
+    return np.mean(aps) if aps else 0
+
 
 # ✅ 모델, 데이터 로더 설정
 num_classes = 7
@@ -289,7 +372,7 @@ split_ratio = 0.7
 model = RadarCameraYOLO(num_classes=num_classes).to(device)
 # dataset = DummyRadarCameraYoloDataset(num_samples=1000)
 # dataset = RadarCameraYoloDataset()
-dataset = RadarCameraYoloDataset(data_root="/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/sample_dataset") # Revised by songhee-cho
+dataset = RadarCameraYoloDataset(data_root="/SSD/guest/teahyeon/Radar-Camera-Fusion-Detection/WaterScenes/sample_dataset") # Revised by songhee-cho
 
 train_size = int(split_ratio * len(dataset))
 val_size = len(dataset) - train_size
@@ -317,6 +400,7 @@ for epoch in range(num_epochs):
 
         # Target class map 초기화 (B, H, W)
         target_classes_map = torch.zeros((class_output.size(0), class_output.size(2), class_output.size(3))).long().to(device)
+        target_bboxes_map = torch.zeros_like(bbox_output).to(device)
 
         # 배치 크기를 고려하여 label 정보를 target_classes_map에 반영
         for b, label in enumerate(labels):  # 배치 단위 처리
@@ -324,21 +408,11 @@ for epoch in range(num_epochs):
                 x_idx = int(obj[1] * class_output.size(2))  # x 좌표를 grid로 변환
                 y_idx = int(obj[2] * class_output.size(3))  # y 좌표를 grid로 변환
                 target_classes_map[b, y_idx, x_idx] = int(obj[0])  # 클래스 ID 저장
+                target_bboxes_map[b, :, y_idx, x_idx] = obj[1:]
 
         # CrossEntropyLoss 적용
         cls_loss = cls_criterion(class_output.view(class_output.size(0), class_output.size(1), -1), 
                                 target_classes_map.view(class_output.size(0), -1))
-
-
-        # Target bbox map 초기화 (B, 4, H, W)
-        target_bboxes_map = torch.zeros_like(bbox_output).to(device)
-
-        # 배치 크기를 고려하여 label 정보를 target_bboxes_map에 반영
-        for b, label in enumerate(labels):  # 배치별 처리
-            for obj in label:
-                x_idx = int(obj[1] * bbox_output.size(2))  # x 좌표를 grid로 변환
-                y_idx = int(obj[2] * bbox_output.size(3))  # y 좌표를 grid로 변환
-                target_bboxes_map[b, :, y_idx, x_idx] = obj[1:]  # [x, y, w, h]
 
         # Bounding Box Loss 계산
         bbox_loss = bbox_criterion(bbox_output, target_bboxes_map)
@@ -358,7 +432,8 @@ for epoch in range(num_epochs):
 
     # ✅ 검증 (Validation)
     model.eval()
-    total_cls_loss, total_bbox_loss = 0, 0
+    total_cls_loss, total_bbox_loss, map50, map75 = 0, 0, [], []
+
     with torch.no_grad():
         for camera, radar, labels in val_loader:
             camera, radar = camera.to(device), radar.to(device)
@@ -382,6 +457,28 @@ for epoch in range(num_epochs):
             total_cls_loss += cls_loss.item()
             total_bbox_loss += bbox_loss.item()
 
+            # ✅ Confidence Score 추가
+            class_prob = torch.softmax(class_output, dim=1)
+            confidence, pred_classes = torch.max(class_prob, dim=1)
+
+            predictions = []
+            ground_truths = []
+
+            for b, label in enumerate(labels):
+                ground_truths.extend(label.cpu().numpy())  
+
+                pred_boxes = bbox_output[b].cpu().numpy().reshape(-1, 4)
+                conf_scores = confidence[b].cpu().numpy().flatten()
+
+                for j in range(pred_boxes.shape[0]):
+                    if conf_scores[j] > 0.3:  # Confidence Threshold 적용
+                        predictions.append([pred_classes[b].cpu().numpy().flatten()[j], *pred_boxes[j], conf_scores[j]])
+
+            map50.append(compute_map(predictions, ground_truths, iou_threshold=0.5))
+            map75.append(compute_map(predictions, ground_truths, iou_threshold=0.75))
+
     print(f"✅ Validation - Epoch {epoch+1}, Class Loss: {total_cls_loss/len(val_loader):.4f}, BBox Loss: {total_bbox_loss/len(val_loader):.4f}")
+    print(f"✅ Validation - mAP@50: {np.mean(map50):.4f}, mAP@75: {np.mean(map75):.4f}")
+
 
 print("✅ Training Completed!")
