@@ -135,7 +135,8 @@ class RadarCameraYoloDataset(Dataset):
         self.num_classes = num_classes
         self.transform = transform if transform else transforms.Compose([
             transforms.Resize(input_shape),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), # Normalization for RGB image
         ])
 
         # 이미지 파일 리스트 가져오기
@@ -154,8 +155,14 @@ class RadarCameraYoloDataset(Dataset):
         image = self.transform(image)  # (3, H, W)
 
         # 2️⃣ 레이더 REVP 데이터 불러오기 (.npz)
+        def preprocess_input_radar(data):
+            _range = np.max(data) - np.min(data) # min-max norm
+            data = (data - np.min(data)) / _range + 0.0000000000001 # avoid 0-value
+            return data
+            
         radar_path = os.path.join(self.radar_dir, file_name + ".npz")
         radar_data = np.load(radar_path)['arr_0']  # (4, H, W) → REVP 맵
+        radar_data = preprocess_input_radar(radar_data)
         radar_revp = torch.tensor(radar_data, dtype=torch.float32)
 
         # 3️⃣ 라벨 불러오기 (.txt)
