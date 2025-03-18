@@ -274,7 +274,7 @@ def compute_iou(box1, box2):
     
     union_area = box1_area + box2_area - inter_area
     iou = inter_area / union_area if union_area > 0 else 0
-    print(f"Box1: {box1}, Box2: {box2}, IoU: {iou:.4f}")
+    #print(f"Box1: {box1}, Box2: {box2}, IoU: {iou:.4f}")
     return iou
 
 # ✅ 좌표 변환 함수 추가
