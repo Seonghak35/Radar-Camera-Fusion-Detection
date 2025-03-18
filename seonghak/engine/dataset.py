@@ -7,9 +7,9 @@ import torchvision.transforms as transforms
 
 from torch.utils.data import DataLoader, Dataset
 from PIL import Image
-from radar_map_generate import RESOLUTION
-from utils import preprocess_input_radar, preprocess_input, cvtColor, resize_image
+from .utils import preprocess_input_radar, preprocess_input, cvtColor, resize_image
 
+RESOLUTION = 160
 
 # ✅ WaterScenes 데이터셋 클래스
 class RadarCameraYoloDataset(Dataset):
@@ -53,8 +53,7 @@ class RadarCameraYoloDataset(Dataset):
         image_shape = np.array(np.shape(image)[0:2])
         image = cvtColor(image)
         image_data = resize_image(image, (self.input_shape[1], self.input_shape[0]), self.letterbox_image)
-        image_data = np.expand_dims(np.transpose(preprocess_input(np.array(image_data, dtype='float32')), (2, 0, 1)), 0)
-
+        image_data = np.transpose(preprocess_input(np.array(image_data, dtype='float32')), (2, 0, 1))  # (3, H, W)
         image_data = torch.tensor(image_data, dtype=torch.float32)
 
         ## previous version ##
@@ -66,7 +65,7 @@ class RadarCameraYoloDataset(Dataset):
         radar_data = np.load(radar_path)['arr_0']  # (4, H, W) → REVP 맵
         radar_data = preprocess_input_radar(radar_data)
         # radar_data = torch.from_numpy(preprocess_input_radar(radar_data)).type(torch.FloatTensor).unsqueeze(0)
-        radar_data = torch.tensor(radar_data, dtype=torch.float32).unsqueeze(0)  # (1, 4, H, W)
+        radar_data = torch.tensor(radar_data, dtype=torch.float32)
 
         ## previous version ##
         # radar_revp = torch.tensor(radar_data, dtype=torch.float32)
@@ -82,6 +81,7 @@ class RadarCameraYoloDataset(Dataset):
 
         # YOLO 형식 라벨을 Tensor로 변환 (M, 5) → [class_id, x_center, y_center, width, height]
         labels = torch.tensor(labels, dtype=torch.float32) if len(labels) > 0 else torch.zeros((0, 5), dtype=torch.float32)
+
         # if len(labels) > 0:
         #     labels = torch.tensor(labels, dtype=torch.float32)
         # else:

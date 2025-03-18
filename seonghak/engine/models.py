@@ -4,6 +4,8 @@ import torch.nn as nn
 from PIL import Image
 from torchvision.ops import DeformConv2d
 from ultralytics import YOLO
+import torch.nn.functional as F
+
 
 # ### Reference yolov8 ###
 
@@ -161,6 +163,56 @@ class CSPBlock(nn.Module):
         y = torch.cat([y1, y2], dim=1)
         return self.final_conv(y)
     
+# ✅ YOLOv8 Backbone (CSPDarknet)
+class CSPDarknet(nn.Module):
+    def __init__(self):
+        super(CSPDarknet, self).__init__()
+        self.stage1 = CSPBlock(128, 256, num_layers=3, downsample=True)
+        self.stage2 = CSPBlock(256, 512, num_layers=3, downsample=True)
+        self.stage3 = CSPBlock(512, 1024, num_layers=1, downsample=True)
+
+    def forward(self, x):
+        x = self.stage1(x)
+        x = self.stage2(x)
+        x = self.stage3(x)
+        return x  # (B, 1024, H/16, W/16)
+    
+# ✅ YOLOv8 Neck (Feature Pyramid Network + PAN)
+class YOLOv8Neck(nn.Module):
+    def __init__(self):
+        super(YOLOv8Neck, self).__init__()
+        self.conv1 = nn.Conv2d(1024, 512, kernel_size=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(512)
+        self.conv2 = nn.Conv2d(512, 256, kernel_size=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(256)
+
+    def forward(self, x):
+        x = F.silu(self.bn1(self.conv1(x)))
+        x = F.silu(self.bn2(self.conv2(x)))
+        return x  # (B, 256, H/16, W/16)
+    
+# ✅ YOLOv8 Head (Detection Head)
+class YOLOv8Head(nn.Module):
+    def __init__(self, num_classes):
+        super(YOLOv8Head, self).__init__()
+        self.cls_head = nn.Conv2d(256, num_classes, kernel_size=1)
+        self.reg_head = nn.Conv2d(256, 4, kernel_size=1)
+        self.obj_head = nn.Conv2d(256, 1, kernel_size=1)
+
+    def forward(self, x):
+        class_output = torch.sigmoid(self.cls_head(x))  # (B, num_classes, H, W)
+        bbox_output = torch.sigmoid(self.reg_head(x))  # (B, 4, H, W)
+        obj_output = torch.sigmoid(self.obj_head(x))  # (B, 1, H, W)
+
+        B, C, H, W = class_output.shape
+        N = H * W  # N개의 detection point
+
+        class_output = class_output.view(B, -1, N).permute(0, 2, 1)  # (B, N, num_classes)
+        bbox_output = bbox_output.view(B, -1, N).permute(0, 2, 1)  # (B, N, 4)
+        obj_output = obj_output.view(B, -1, N).permute(0, 2, 1)  # (B, N, 1)
+
+        return torch.cat([bbox_output, obj_output, class_output], dim=2)  # (B, N, num_classes + 5)
+
 
 # ✅ Shuffle Attention 정의
 class ShuffleAttention(nn.Module):
@@ -217,33 +269,36 @@ class RadarCameraYOLO(nn.Module):
 
         # channel mathcing
         self.fusion_conv = nn.Sequential(
-        nn.Conv2d(128 + 64, 128, kernel_size=3, stride=2, padding=1, bias=False),  
-        nn.BatchNorm2d(128),
-        nn.SiLU()
-        )
-        self.backbone_downsample = nn.Conv2d(128, 128, kernel_size=3, stride=2, padding=1, bias=False)
-
-        # YOLO Backbone (CSPDarknet)
-        self.yolo_backbone = nn.Sequential(
-            CSPBlock(128, 256, num_layers=3, downsample=True),
-            CSPBlock(256, 512, num_layers=3, downsample=False),
-            CSPBlock(512, 1024, num_layers=1, downsample=False)
-        )
-
-        # FPN Neck (Feature Pyramid Network)
-        self.yolo_neck = nn.Sequential(
-            nn.Conv2d(1024, 512, kernel_size=1, bias=False),
-            nn.BatchNorm2d(512),
+            nn.Conv2d(128 + 64, 128, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
             nn.SiLU(),
-            nn.Conv2d(512, 256, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(256),
-            nn.SiLU()
         )
+        # self.backbone_downsample = nn.Conv2d(128, 128, kernel_size=3, stride=2, padding=1, bias=False)
+
+        # # YOLO Backbone (CSPDarknet)
+        # self.yolo_backbone = nn.Sequential(
+        #     CSPBlock(128, 256, num_layers=3, downsample=True),
+        #     CSPBlock(256, 512, num_layers=3, downsample=False),
+        #     CSPBlock(512, 1024, num_layers=1, downsample=False)
+        # )
+
+        # # FPN Neck (Feature Pyramid Network)
+        # self.yolo_neck = nn.Sequential(
+        #     nn.Conv2d(1024, 512, kernel_size=1, bias=False),
+        #     nn.BatchNorm2d(512),
+        #     nn.SiLU(),
+        #     nn.Conv2d(512, 256, kernel_size=3, padding=1, bias=False),
+        #     nn.BatchNorm2d(256),
+        #     nn.SiLU()
+        # )
 
         # YOLO Decoupled Head
-        self.yolo_head_cls = nn.Conv2d(256, 7, kernel_size=1)
-        self.yolo_head_reg = nn.Conv2d(256, 4, kernel_size=1)
-        self.yolo_head_obj = nn.Conv2d(256, 1, kernel_size=1)  # Objectness Score 추가
+        # self.yolo_head_cls = nn.Conv2d(256, 7, kernel_size=1)
+        # self.yolo_head_reg = nn.Conv2d(256, 4, kernel_size=1)
+        # self.yolo_head_obj = nn.Conv2d(256, 1, kernel_size=1)  # Objectness Score 추가
+        self.backbone = CSPDarknet()
+        self.neck = YOLOv8Neck()
+        self.head = YOLOv8Head(num_classes)
 
     def forward(self, camera, radar):
         # Camera Feature Extraction
@@ -265,27 +320,31 @@ class RadarCameraYOLO(nn.Module):
         fusion_feature = torch.cat([F_camera, self.alpha * radar_feature], dim=1)
         fusion_feature = self.fusion_conv(fusion_feature)
 
-        # YOLO Backbone
-        yolo_feature = self.yolo_backbone(fusion_feature)
-        neck_feature = self.yolo_neck(yolo_feature)
+        backbone_out = self.backbone(fusion_feature)
+        neck_out = self.neck(backbone_out)
+        results = self.head(neck_out)
 
-        # YOLO Head Outputs
-        class_output = torch.sigmoid(self.yolo_head_cls(neck_feature))  # (B, num_classes, H, W)
-        bbox_output = torch.sigmoid(self.yolo_head_reg(neck_feature))   # (B, 4, H, W)
-        obj_output = torch.sigmoid(self.yolo_head_obj(neck_feature))    # (B, 1, H, W)
+        # # YOLO Backbone
+        # yolo_feature = self.yolo_backbone(fusion_feature)
+        # neck_feature = self.yolo_neck(yolo_feature)
 
-        # Shape 변환: (B, num_classes + 5, H, W) -> (B, N, num_classes + 5)
-        B, C, H, W = class_output.shape
-        N = H * W  # N: HxW 개수의 anchor points
+        # # YOLO Head Outputs
+        # class_output = torch.sigmoid(self.yolo_head_cls(neck_feature))  # (B, num_classes, H, W)
+        # bbox_output = torch.sigmoid(self.yolo_head_reg(neck_feature))   # (B, 4, H, W)
+        # obj_output = torch.sigmoid(self.yolo_head_obj(neck_feature))    # (B, 1, H, W)
+
+        # # Shape 변환: (B, num_classes + 5, H, W) -> (B, N, num_classes + 5)
+        # B, C, H, W = class_output.shape
+        # N = H * W  # N: HxW 개수의 anchor points
         
-        class_output = class_output.view(B, 7, N).permute(0, 2, 1)  # (B, N, num_classes)
-        bbox_output = bbox_output.view(B, 4, N).permute(0, 2, 1)  # (B, N, 4)
-        obj_output = obj_output.view(B, 1, N).permute(0, 2, 1)  # (B, N, 1)
+        # class_output = class_output.view(B, 7, N).permute(0, 2, 1)  # (B, N, num_classes)
+        # bbox_output = bbox_output.view(B, 4, N).permute(0, 2, 1)  # (B, N, 4)
+        # obj_output = obj_output.view(B, 1, N).permute(0, 2, 1)  # (B, N, 1)
 
-        # 최종 YOLO 형식의 출력 (B, N, num_classes + 5)
-        yolo_output = torch.cat([bbox_output, obj_output, class_output], dim=2)  # (B, N, num_classes + 5)
+        # # 최종 YOLO 형식의 출력 (B, N, num_classes + 5)
+        # yolo_output = torch.cat([bbox_output, obj_output, class_output], dim=2)  # (B, N, num_classes + 5)
 
-        return yolo_output
+        return results
     
 
 # ✅ Dynamic Collate Function (YOLO 바운딩 박스 개수 다름 문제 해결)
