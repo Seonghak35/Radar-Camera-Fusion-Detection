@@ -12,15 +12,12 @@ import torchvision.transforms as transforms
 import pdb
 from WaterScenes.radar_map_generate import RESOLUTION # Revised by songhee-cho
 
-# ✅ CUDA 강제 비활성화 (GPU 사용 금지)
+# CPU mode
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
-# ✅ 강제 CPU 모드
 device = torch.device("cpu")
-print("⚠️ Running on CPU mode only")
+print("Running on CPU mode only")
 
-
-# ✅ CSP Block 정의
+# Define CSP block
 class CSPBlock(nn.Module):
     def __init__(self, in_channels, out_channels, num_layers=1, expansion=0.5, downsample=False):
         super(CSPBlock, self).__init__()
@@ -51,7 +48,7 @@ class CSPBlock(nn.Module):
         return self.final_conv(y)
     
 
-# ✅ Shuffle Attention 정의
+# Define Shuffle attention
 class ShuffleAttention(nn.Module):
     def __init__(self, channels, groups=2):
         super(ShuffleAttention, self).__init__()
@@ -82,49 +79,17 @@ class ShuffleAttention(nn.Module):
         spatial_att = self.spatial_attention(x)
         return x * channel_att * spatial_att
     
-
-# # ✅ WaterScenes와 동일한 차원의 Dummy Dataset 생성
-# class DummyRadarCameraYoloDataset(Dataset):
-#     def __init__(self, num_samples=100, input_shape=(160, 160), num_classes=7):
-#         self.num_samples = num_samples
-#         self.input_shape = input_shape
-#         self.num_classes = num_classes
-
-#     def __len__(self):
-#         return self.num_samples
-
-#     def __getitem__(self, idx):
-#         # Image data (RGB)
-#         camera = torch.rand((3, *self.input_shape))
-
-#         # Radar REVP Map 생성 (R, E, V, P 4 channel)
-#         range_map = torch.rand((1, *self.input_shape)) * 100  # 거리 (0~100m)
-#         elevation_map = torch.rand((1, *self.input_shape)) * 180  # 고도각 (0~180도)
-#         velocity_map = torch.randn((1, *self.input_shape))  # 속도 (-x~+x)
-#         power_map = torch.rand((1, *self.input_shape)) * 50  # 반사 신호 강도
-
-#         radar_revp = torch.cat((range_map, elevation_map, velocity_map, power_map), dim=0)  # (4, H, W)
-
-#         # YOLO-format Bounding Box (M, 5) [class_id, x, y, w, h]
-#         M = np.random.randint(1, 10)  # 임의의 객체 개수 (1~10)
-#         labels = torch.zeros((M, 5))  # (M, 5) Tensor
-
-#         labels[:, 0] = torch.randint(0, self.num_classes, (M,))  # 클래스 ID (정수)
-#         labels[:, 1:] = torch.rand((M, 4))  # x_center, y_center, width, height (0~1 범위)
-        
-#         return camera, radar_revp, labels
-    
-# ✅ WaterScenes 데이터셋 클래스
+# WaterScenes dataset
 class RadarCameraYoloDataset(Dataset):
     def __init__(self, data_root="/SSD/guest/teahyeon/Radar-Camera-Fusion-Detection/WaterScenes/data/",
                  input_shape=(RESOLUTION, RESOLUTION), num_classes=7, transform=None):
         """
         WaterScenes DataLoader
 
-        :param data_root: 데이터가 저장된 루트 디렉토리
-        :param input_shape: 이미지 및 레이더 데이터의 크기
-        :param num_classes: 객체 탐지 클래스 개수
-        :param transform: 이미지 변환을 위한 torchvision.transforms
+        :param data_root: data root dir
+        :param input_shape: size of image and radar dataset
+        :param num_classes: target class
+        :param transform: for transform
         """
         self.data_root = data_root
         self.image_dir = os.path.join(data_root, "image")
@@ -139,22 +104,22 @@ class RadarCameraYoloDataset(Dataset):
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), # Normalization for RGB image
         ])
 
-        # 이미지 파일 리스트 가져오기
+        # Load image file list
         self.image_files = sorted([f for f in os.listdir(self.image_dir) if f.endswith('.jpg')])
 
     def __len__(self):
         return len(self.image_files)
 
     def __getitem__(self, idx):
-        # 파일명 가져오기 (확장자 제외)
+        # Load file name, except for extension
         file_name = os.path.splitext(self.image_files[idx])[0]
 
-        # 1️⃣ 이미지 불러오기 (RGB)
+        # 1) Load RGB (.png)
         image_path = os.path.join(self.image_dir, file_name + ".jpg")
         image = Image.open(image_path).convert("RGB")
         image = self.transform(image)  # (3, H, W)
 
-        # 2️⃣ 레이더 REVP 데이터 불러오기 (.npz)
+        # 2) Load radar data (.npz)
         def preprocess_input_radar(data):
             _range = np.max(data) - np.min(data) # min-max norm
             data = (data - np.min(data)) / _range + 0.0000000000001 # avoid 0-value
@@ -165,7 +130,7 @@ class RadarCameraYoloDataset(Dataset):
         radar_data = preprocess_input_radar(radar_data)
         radar_revp = torch.tensor(radar_data, dtype=torch.float32)
 
-        # 3️⃣ 라벨 불러오기 (.txt)
+        # 3) Load YOLO annotation (.txt)
         label_path = os.path.join(self.label_dir, file_name + ".txt")
         labels = []
         if os.path.exists(label_path):
@@ -174,11 +139,11 @@ class RadarCameraYoloDataset(Dataset):
                     values = list(map(float, line.strip().split()))
                     labels.append(values)
 
-        # YOLO 형식 라벨을 Tensor로 변환 (M, 5) → [class_id, x_center, y_center, width, height]
+        # YOLO Tensor (M, 5) → [class_id, x_center, y_center, width, height]
         if len(labels) > 0:
             labels = torch.tensor(labels, dtype=torch.float32)
         else:
-            labels = torch.zeros((0, 5), dtype=torch.float32)  # 객체 없는 경우 빈 Tensor
+            labels = torch.zeros((0, 5), dtype=torch.float32)  # No object, 0-Tensor
 
         return image, radar_revp, labels
     
@@ -236,6 +201,7 @@ class RadarCameraYOLO(nn.Module):
         # YOLO Decoupled Head
         self.yolo_head_cls = nn.Conv2d(256, num_classes, kernel_size=1)
         self.yolo_head_reg = nn.Conv2d(256, 4, kernel_size=1)
+        self.yolo_head_obj = nn.Conv2d(256, 1, kernel_size=1) # Added by songhee-cho
 
     def forward(self, camera, radar):
         # Camera Feature Extraction
@@ -265,11 +231,14 @@ class RadarCameraYOLO(nn.Module):
         fusion_feature = self.fusion_conv(fusion_feature)
         yolo_feature = self.yolo_backbone(fusion_feature)
         neck_feature = self.yolo_neck(yolo_feature)
-        class_output = self.yolo_head_cls(neck_feature)
-        bbox_output = self.yolo_head_reg(neck_feature)
+        class_output = self.yolo_head_cls(neck_feature) # (B,num_classes,H,W)
+        #bbox_output = self.yolo_head_reg(neck_feature) # (B, 4, H, W)
+        obj_output = torch.sigmoid(self.yolo_head_obj(neck_feature)) # (B, 1, H, W)
+        bbox_output = self.yolo_head_reg(neck_feature)  # (B, 4, H, W)
+        bbox_output[:, :2] = torch.sigmoid(bbox_output[:, :2])  # center x, y → sigmoid
+        bbox_output[:, 2:] = torch.exp(bbox_output[:, 2:])  # width, height → exp
 
-        return class_output, bbox_output   
-
+        return class_output, bbox_output, obj_output
 
 # ✅ Dynamic Collate Function (YOLO 바운딩 박스 개수 다름 문제 해결)
 def yolo_collate_fn(batch):
@@ -289,35 +258,35 @@ def yolo_collate_fn(batch):
     return cameras, radars, labels  # ✅ `labels`은 리스트로 유지
 
 
-# ✅ IoU (Intersection over Union) 계산 함수
+# ✅ IoU 계산 함수 수정
 def compute_iou(box1, box2):
     """
-    box1, box2: [x_center, y_center, width, height]
+    box1, box2: [x1, y1, x2, y2]
     """
-    box1_x1 = box1[0] - box1[2] / 2
-    box1_y1 = box1[1] - box1[3] / 2
-    box1_x2 = box1[0] + box1[2] / 2
-    box1_y2 = box1[1] + box1[3] / 2
-
-    box2_x1 = box2[0] - box2[2] / 2
-    box2_y1 = box2[1] - box2[3] / 2
-    box2_x2 = box2[0] + box2[2] / 2
-    box2_y2 = box2[1] + box2[3] / 2
-
-    inter_x1 = max(box1_x1, box2_x1)
-    inter_y1 = max(box1_y1, box2_y1)
-    inter_x2 = min(box1_x2, box2_x2)
-    inter_y2 = min(box1_y2, box2_y2)
+    inter_x1 = max(box1[0], box2[0])
+    inter_y1 = max(box1[1], box2[1])
+    inter_x2 = min(box1[2], box2[2])
+    inter_y2 = min(box1[3], box2[3])
 
     inter_area = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
-    box1_area = (box1_x2 - box1_x1) * (box1_y2 - box1_y1)
-    box2_area = (box2_x2 - box2_x1) * (box2_y2 - box2_y1)
+    box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    
     union_area = box1_area + box2_area - inter_area
+    iou = inter_area / union_area if union_area > 0 else 0
+    print(f"Box1: {box1}, Box2: {box2}, IoU: {iou:.4f}")
+    return iou
 
-    return inter_area / union_area if union_area > 0 else 0
+# ✅ 좌표 변환 함수 추가
+def xywh2xyxy(x):
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[..., 0] = x[..., 0] - x[..., 2] / 2  # x_center → x1
+    y[..., 1] = x[..., 1] - x[..., 3] / 2  # y_center → y1
+    y[..., 2] = x[..., 0] + x[..., 2] / 2  # x_center → x2
+    y[..., 3] = x[..., 1] + x[..., 3] / 2  # y_center → y2
+    return y
 
-
-# ✅ Precision-Recall 곡선 기반 AP 계산
+# ✅ AP 계산 함수 수정
 def compute_ap(precision, recall):
     recall = np.concatenate(([0.0], recall, [1.0]))
     precision = np.concatenate(([0.0], precision, [0.0]))
@@ -327,30 +296,34 @@ def compute_ap(precision, recall):
 
     indices = np.where(recall[1:] != recall[:-1])[0]
     ap = np.sum((recall[indices + 1] - recall[indices]) * precision[indices + 1])
-
     return ap
 
-
-# ✅ mAP (Mean Average Precision) 계산 함수 (Confidence Score 추가)
-def compute_map(predictions, ground_truths, iou_threshold=0.5, confidence_threshold=0.3):
+# ✅ mAP 계산 함수 수정
+def compute_map(predictions, ground_truths, iou_threshold=0.5):
     aps = []
     for class_id in range(num_classes):
-        gt_boxes = [gt[1:] for gt in ground_truths if gt[0] == class_id]
-        pred_boxes = [pred[1:] for pred in predictions if pred[0] == class_id and pred[-1] > confidence_threshold]
+        gt_boxes = [gt[1:] for gt in ground_truths if int(gt[0]) == class_id]
+        pred_boxes = [pred[1:] for pred in predictions if int(pred[0]) == class_id]
 
         if len(gt_boxes) == 0 or len(pred_boxes) == 0:
             continue
 
-        pred_boxes = sorted(pred_boxes, key=lambda x: x[-1], reverse=True)  # Confidence 기준 정렬
+        # ✅ IoU 계산을 위해 좌표 변환 수행
+        gt_boxes = xywh2xyxy(np.array(gt_boxes))
+        pred_boxes = xywh2xyxy(np.array(pred_boxes))
 
-        tp, fp = np.zeros(len(pred_boxes)), np.zeros(len(pred_boxes))
+        # ✅ Confidence 기준으로 정렬
+        pred_boxes = sorted(pred_boxes, key=lambda x: x[-1], reverse=True)
+
+        tp = np.zeros(len(pred_boxes))
+        fp = np.zeros(len(pred_boxes))
         matched_gt = set()
 
         for i, pred in enumerate(pred_boxes):
             best_iou = 0
             best_gt_idx = -1
             for j, gt in enumerate(gt_boxes):
-                iou = compute_iou(pred, gt)
+                iou = compute_iou(pred[:4], gt[:4])
                 if iou > best_iou and j not in matched_gt:
                     best_iou = iou
                     best_gt_idx = j
@@ -361,17 +334,41 @@ def compute_map(predictions, ground_truths, iou_threshold=0.5, confidence_thresh
             else:
                 fp[i] = 1
 
+        # ✅ Precision-Recall 계산
         tp_cumsum = np.cumsum(tp)
         fp_cumsum = np.cumsum(fp)
 
         recall = tp_cumsum / len(gt_boxes)
         precision = tp_cumsum / (tp_cumsum + fp_cumsum + 1e-6)
 
+        # ✅ AP 계산 및 추가
         ap = compute_ap(precision, recall)
         aps.append(ap)
 
     return np.mean(aps) if aps else 0
 
+
+class YOLOLoss(nn.Module):
+    def __init__(self, lambda_cls=1.0, lambda_box=1.0, lambda_obj=1.0):
+        super(YOLOLoss, self).__init__()
+        self.cls_loss = nn.CrossEntropyLoss()
+        self.box_loss = nn.SmoothL1Loss()
+        self.obj_loss = nn.BCEWithLogitsLoss()
+
+        self.lambda_cls = lambda_cls
+        self.lambda_box = lambda_box
+        self.lambda_obj = lambda_obj
+
+    def forward(self, class_output, bbox_output, obj_output, target_classes_map, target_bboxes_map, target_obj_map):
+        cls_loss = self.cls_loss(class_output.view(class_output.size(0), class_output.size(1), -1),
+                                 target_classes_map.view(class_output.size(0), -1))
+        
+        box_loss = self.box_loss(bbox_output, target_bboxes_map)
+        obj_loss = self.obj_loss(obj_output, target_obj_map)
+
+        total_loss = self.lambda_cls * cls_loss + self.lambda_box * box_loss + self.lambda_obj * obj_loss
+        
+        return total_loss, cls_loss, box_loss, obj_loss
 
 # ✅ 모델, 데이터 로더 설정
 num_classes = 7
@@ -379,7 +376,7 @@ split_ratio = 0.7
 model = RadarCameraYOLO(num_classes=num_classes).to(device)
 # dataset = DummyRadarCameraYoloDataset(num_samples=1000)
 # dataset = RadarCameraYoloDataset()
-dataset = RadarCameraYoloDataset(data_root="/SSD/guest/teahyeon/Radar-Camera-Fusion-Detection/WaterScenes/sample_dataset") # Revised by songhee-cho
+dataset = RadarCameraYoloDataset(data_root="WaterScenes/sample_dataset") # Revised by songhee-cho
 
 train_size = int(split_ratio * len(dataset))
 val_size = len(dataset) - train_size
@@ -387,84 +384,103 @@ train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size,
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
 val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=1, collate_fn=yolo_collate_fn)
 
-# ✅ 손실 함수 및 최적화 설정
-cls_criterion = nn.CrossEntropyLoss() 
-bbox_criterion = nn.SmoothL1Loss()  
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-
 # ✅ 학습 및 검증 루프
-num_epochs = 5
-print("🚀 Training started!")
+num_epochs = 10
+print("*************Training started!")
+
+# ✅ 손실 함수 및 최적화 설정
+loss_fn = YOLOLoss(lambda_cls=1.0, lambda_box=1.0, lambda_obj=1.0)  
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 for epoch in range(num_epochs):
-
-    # ✅ 학습 (Training)
+    # ✅ 모델 학습 모드 설정
     model.train()
+    total_cls_loss, total_box_loss, total_obj_loss = 0, 0, 0
+    
     for i, (camera, radar, labels) in enumerate(train_loader):
         camera, radar = camera.to(device), radar.to(device)
 
-        class_output, bbox_output = model(camera, radar) # Model output
+        # ✅ 모델 출력 (class_output, bbox_output, obj_output)
+        class_output, bbox_output, obj_output = model(camera, radar)
 
-        # Target class map 초기화 (B, H, W)
+        # ✅ Target 초기화
         target_classes_map = torch.zeros((class_output.size(0), class_output.size(2), class_output.size(3))).long().to(device)
         target_bboxes_map = torch.zeros_like(bbox_output).to(device)
+        target_obj_map = torch.zeros((obj_output.size(0), 1, obj_output.size(2), obj_output.size(3)), device=device)
 
-        # 배치 크기를 고려하여 label 정보를 target_classes_map에 반영
-        for b, label in enumerate(labels):  # 배치 단위 처리
+        # ✅ Label → Target 변환
+        for b, label in enumerate(labels):
             for obj in label:
-                x_idx = int(obj[1] * class_output.size(2))  # x 좌표를 grid로 변환
-                y_idx = int(obj[2] * class_output.size(3))  # y 좌표를 grid로 변환
-                target_classes_map[b, y_idx, x_idx] = int(obj[0])  # 클래스 ID 저장
+                x_idx = int(obj[1] * class_output.size(2))
+                y_idx = int(obj[2] * class_output.size(3))
+                
+                target_classes_map[b, y_idx, x_idx] = int(obj[0])
                 target_bboxes_map[b, :, y_idx, x_idx] = obj[1:]
+                target_obj_map[b, 0, y_idx, x_idx] = 1.0  # Target existence → 1
 
-        # CrossEntropyLoss 적용
-        cls_loss = cls_criterion(class_output.view(class_output.size(0), class_output.size(1), -1), 
-                                target_classes_map.view(class_output.size(0), -1))
+        # ✅ 손실 계산
+        total_loss, cls_loss, box_loss, obj_loss = loss_fn(class_output, bbox_output, obj_output,
+                                                           target_classes_map, target_bboxes_map, target_obj_map)
 
-        # Bounding Box Loss 계산
-        bbox_loss = bbox_criterion(bbox_output, target_bboxes_map)
-        
-        # Total Loss
-        loss = cls_loss + bbox_loss
-
+        # ✅ 역전파 및 최적화
         optimizer.zero_grad()
-        loss.backward()
+        total_loss.backward()
         optimizer.step()
 
+        # ✅ 손실 값 집계
+        total_cls_loss += cls_loss.item()
+        total_box_loss += box_loss.item()
+        total_obj_loss += obj_loss.item()
+
+        # ✅ 진행 상태 출력
         if i % 5 == 0:
-            print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i}/{len(train_loader)}], Class Loss: {cls_loss.item():.4f}, BBox Loss: {bbox_loss.item():.4f}, Total Loss: {loss.item():.4f}")
+            print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i}/{len(train_loader)}], "
+                  f"Class Loss: {cls_loss.item():.4f}, BBox Loss: {box_loss.item():.4f}, "
+                  f"Objectness Loss: {obj_loss.item():.4f}, Total Loss: {total_loss.item():.4f}")
 
-    print(f"✅ Epoch {epoch+1} completed.")
+    # ✅ 에폭 별 평균 손실 출력
+    print(f"✅ Epoch {epoch+1} Completed - "
+          f"Class Loss: {total_cls_loss/len(train_loader):.4f}, "
+          f"BBox Loss: {total_box_loss/len(train_loader):.4f}, "
+          f"Objectness Loss: {total_obj_loss/len(train_loader):.4f}")
 
-
-    # ✅ 검증 (Validation)
+    # ✅ 모델 검증 모드 설정
     model.eval()
-    total_cls_loss, total_bbox_loss, map50, map75 = 0, 0, [], []
+    total_cls_loss, total_box_loss, total_obj_loss = 0, 0, 0
+    map50, map75 = [], []
 
     with torch.no_grad():
-        for camera, radar, labels in val_loader:
+        for i, (camera, radar, labels) in enumerate(val_loader):
             camera, radar = camera.to(device), radar.to(device)
 
-            class_output, bbox_output = model(camera, radar)
+            # ✅ 모델 출력
+            class_output, bbox_output, obj_output = model(camera, radar)
 
+            # ✅ Target 초기화
             target_classes_map = torch.zeros((class_output.size(0), class_output.size(2), class_output.size(3))).long().to(device)
             target_bboxes_map = torch.zeros_like(bbox_output).to(device)
+            target_obj_map = torch.zeros_like(obj_output).to(device)
 
+            # ✅ Label → Target 변환
             for b, label in enumerate(labels):
                 for obj in label:
                     x_idx = int(obj[1] * class_output.size(2))
                     y_idx = int(obj[2] * class_output.size(3))
+
                     target_classes_map[b, y_idx, x_idx] = int(obj[0])
                     target_bboxes_map[b, :, y_idx, x_idx] = obj[1:]
+                    target_obj_map[b,0, y_idx, x_idx] = 1.0
 
-            cls_loss = cls_criterion(class_output.view(class_output.size(0), class_output.size(1), -1),
-                                     target_classes_map.view(class_output.size(0), -1))
-            bbox_loss = bbox_criterion(bbox_output, target_bboxes_map)
+            # ✅ 손실 계산
+            total_loss, cls_loss, box_loss, obj_loss = loss_fn(class_output, bbox_output, obj_output,
+                                                               target_classes_map, target_bboxes_map, target_obj_map)
 
+            # ✅ 손실 값 집계
             total_cls_loss += cls_loss.item()
-            total_bbox_loss += bbox_loss.item()
+            total_box_loss += box_loss.item()
+            total_obj_loss += obj_loss.item()
 
-            # ✅ Confidence Score 추가
+            # ✅ Confidence 계산
             class_prob = torch.softmax(class_output, dim=1)
             confidence, pred_classes = torch.max(class_prob, dim=1)
 
@@ -472,20 +488,32 @@ for epoch in range(num_epochs):
             ground_truths = []
 
             for b, label in enumerate(labels):
-                ground_truths.extend(label.cpu().numpy())  
+                ground_truths.extend(label.cpu().numpy())
 
                 pred_boxes = bbox_output[b].cpu().numpy().reshape(-1, 4)
                 conf_scores = confidence[b].cpu().numpy().flatten()
 
                 for j in range(pred_boxes.shape[0]):
-                    if conf_scores[j] > 0.3:  # Confidence Threshold 적용
-                        predictions.append([pred_classes[b].cpu().numpy().flatten()[j], *pred_boxes[j], conf_scores[j]])
+                    if conf_scores[j] > 0.3:
+                        predictions.append([
+                            pred_classes[b].cpu().numpy().flatten()[j],
+                            *pred_boxes[j],
+                            conf_scores[j]
+                        ])
 
+            # ✅ mAP 계산 (IoU Threshold: 0.5, 0.75)
             map50.append(compute_map(predictions, ground_truths, iou_threshold=0.5))
             map75.append(compute_map(predictions, ground_truths, iou_threshold=0.75))
 
-    print(f"✅ Validation - Epoch {epoch+1}, Class Loss: {total_cls_loss/len(val_loader):.4f}, BBox Loss: {total_bbox_loss/len(val_loader):.4f}")
-    print(f"✅ Validation - mAP@50: {np.mean(map50):.4f}, mAP@75: {np.mean(map75):.4f}")
-
+        # ✅ 검증 결과 출력
+        print(f"✅ Validation - Epoch {epoch+1}, "
+              f"Class Loss: {total_cls_loss/len(val_loader):.4f}, "
+              f"BBox Loss: {total_box_loss/len(val_loader):.4f}, "
+              f"Objectness Loss: {total_obj_loss/len(val_loader):.4f}")
+        print(f"✅ Validation - mAP@50: {np.mean(map50):.4f}, mAP@75: {np.mean(map75):.4f}")
 
 print("✅ Training Completed!")
+save_path = "./trained_model.pth"
+torch.save(model.state_dict(), save_path)
+print(f"✅ Model saved to {save_path}")
+

@@ -17,8 +17,8 @@ X_SCALE = ORIGINAL_WIDTH / RESOLUTION
 Y_SCALE = ORIGINAL_HEIGHT / RESOLUTION
 
 # Paths (customizable)
-RADAR_ROOT = "/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/sample_dataset/radar"
-SAVE_RADAR_MAP_ROOT = "/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/sample_dataset/radar/REVP_map"
+RADAR_ROOT = "WaterScenes/sample_dataset/radar"
+SAVE_RADAR_MAP_ROOT = "WaterScenes/sample_dataset/radar/REVP_map"
 
 def load_radar_data(radar_root, resolution, x_scale, y_scale):
     radar_files = [
