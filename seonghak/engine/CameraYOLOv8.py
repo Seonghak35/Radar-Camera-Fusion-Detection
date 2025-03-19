@@ -66,8 +66,15 @@ class YOLOLoss(nn.Module):
         return total_loss / B, total_bbox_loss / B, total_obj_loss / B, total_class_loss / B
 
 # ✅ Training Function
-def train_model(model, dataloader, criterion, optimizer, num_epochs):
+def train_model(model, dataloader, criterion, optimizer, num_epochs, start_epoch, model_path=None):
     model.train()
+    os.makedirs("output", exist_ok=True)  # 🔥 'output' 폴더 생성 (없으면 자동 생성)
+
+    # 🔥 기존 모델이 있으면 불러오기
+    if model_path and os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path))
+        print(f"✅ Loaded model from {model_path}, resuming training from epoch {start_epoch}")
+
     for epoch in range(num_epochs):
         epoch_loss, epoch_bbox_loss, epoch_obj_loss, epoch_class_loss = 0, 0, 0, 0
         total_samples = 0  # 전체 샘플 수
@@ -90,7 +97,8 @@ def train_model(model, dataloader, criterion, optimizer, num_epochs):
             epoch_obj_loss += obj_loss.item() * batch_size
             epoch_class_loss += class_loss.item() * batch_size
 
-        # 🔥 전체 샘플 수 기준으로 평균 Loss 계산
+        # 🔥 전체 샘플 수 기준으로 평균 Loss 계산Rkwhr6914*
+
         print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss / total_samples:.4f}, "
               f"Bbox Loss: {epoch_bbox_loss / total_samples:.4f}, "
               f"Obj Loss: {epoch_obj_loss / total_samples:.4f}, "
@@ -118,12 +126,13 @@ dataset = RadarCameraYoloDataset(data_root="/workspaces/Radar-Camera-Fusion-Dete
 train_loader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
 # val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=1, collate_fn=yolo_collate_fn)
 
+lr = 0.0001
 criterion = YOLOLoss(num_classes)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=lr)
 
 # ✅ 학습 및 검증 루프
 print("🚀 Training Started!")
-train_model(model, train_loader, criterion, optimizer, num_epochs=50)
+train_model(model, train_loader, criterion, optimizer, num_epochs=50, start_epoch=20, model_path="./output/trained_model_epoch_20.pth")
 print("✅ Training Completed!")
 
 # # ✅ 학습 완료 후 모델 저장
