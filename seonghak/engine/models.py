@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from PIL import Image
 from torchvision.ops import DeformConv2d
-from ultralytics import YOLO
+# from ultralytics import YOLO
 import torch.nn.functional as F
 
 

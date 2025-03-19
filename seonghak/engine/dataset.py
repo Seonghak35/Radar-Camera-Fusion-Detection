@@ -9,11 +9,11 @@ from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 from utils import preprocess_input_radar, preprocess_input, cvtColor, resize_image
 
-RESOLUTION = 160
+RESOLUTION = 320
 
 # ✅ WaterScenes 데이터셋 클래스
 class RadarCameraYoloDataset(Dataset):
-    def __init__(self, data_root="/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/data/",
+    def __init__(self, data_root="WaterScenes/dataset/",
                  input_shape=(RESOLUTION, RESOLUTION), num_classes=7, transform=None):
         """
         WaterScenes DataLoader
@@ -26,7 +26,7 @@ class RadarCameraYoloDataset(Dataset):
         self.data_root = data_root
         self.image_dir = os.path.join(data_root, "image")
         self.radar_dir = os.path.join(data_root, "radar/REVP_map")
-        self.label_dir = os.path.join(data_root, "detection")
+        self.label_dir = os.path.join(data_root, "detection/yolo")
 
         self.input_shape = input_shape
         self.num_classes = num_classes

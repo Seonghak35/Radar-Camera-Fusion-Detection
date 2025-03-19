@@ -5,6 +5,7 @@ import torch.optim as optim
 import numpy as np
 import pandas as pd
 import pdb
+from tqdm import tqdm
 
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -12,12 +13,12 @@ from models import CSPBlock, ShuffleAttention, CameraYOLO
 from dataset import RadarCameraYoloDataset
 from utils import yolo_collate_fn, bbox_iou
 
-# ✅ CUDA 강제 비활성화 (GPU 사용 금지)
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
+# # ✅ CUDA 강제 비활성화 (GPU 사용 금지)
+# os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
-# ✅ 강제 CPU 모드
-device = torch.device("cpu")
-print("⚠️ Running on CPU mode only")
+# # ✅ 강제 CPU 모드
+# device = torch.device("cpu")
+# print("⚠️ Running on CPU mode only")
 
 # ✅ YOLO Loss Function
 class YOLOLoss(nn.Module):
@@ -81,7 +82,7 @@ def train_model(model, dataloader, criterion, optimizer, num_epochs, start_epoch
         epoch_loss, epoch_bbox_loss, epoch_obj_loss, epoch_class_loss = 0, 0, 0, 0
         total_samples = 0  # 전체 샘플 수
         
-        for images, radar, labels in dataloader:
+        for images, radar, labels in tqdm(dataloader):
             batch_size = images.shape[0]  # 현재 배치 크기
             total_samples += batch_size
 
@@ -127,27 +128,27 @@ def train_model(model, dataloader, criterion, optimizer, num_epochs, start_epoch
 
 
 # ✅ Model & Dataset Setup
-device = torch.device("cpu")
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 num_classes = 7
 split_ratio = 0.7
 
 model = CameraYOLO(num_classes=num_classes).to(device)
-dataset = RadarCameraYoloDataset(data_root="/workspaces/Radar-Camera-Fusion-Detection/WaterScenes/sample_dataset/")
+dataset = RadarCameraYoloDataset(data_root="../../WaterScenes/dataset/")
 
 # train_size = int(split_ratio * len(dataset))
 # val_size = len(dataset) - train_size
 # train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
-train_loader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
+train_loader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
 # val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=1, collate_fn=yolo_collate_fn)
 
-learning_rate = 0.0005
+learning_rate = 5e-4
 criterion = YOLOLoss(num_classes)
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 # ✅ 학습 및 검증 루프
 print("🚀 Training Started!")
-train_model(model, train_loader, criterion, optimizer, num_epochs=50)
+train_model(model, train_loader, criterion, optimizer, num_epochs=100)
 print("✅ Training Completed!")
 
 # # ✅ 학습 완료 후 모델 저장
