@@ -240,7 +240,7 @@ class RadarCameraYOLO(nn.Module):
 
         return class_output, bbox_output, obj_output
 
-# ✅ Dynamic Collate Function (YOLO 바운딩 박스 개수 다름 문제 해결)
+# Dynamic Collate Function
 def yolo_collate_fn(batch):
     cameras = []
     radars = []
@@ -249,16 +249,14 @@ def yolo_collate_fn(batch):
     for camera, radar, label in batch:
         cameras.append(camera)
         radars.append(radar)
-        labels.append(label)  # ✅ 리스트로 유지 (Tensor 변환 X)
-
-    # ✅ 이미지 및 레이더 데이터를 스택
+        labels.append(label)
     cameras = torch.stack(cameras, dim=0)
     radars = torch.stack(radars, dim=0)
 
-    return cameras, radars, labels  # ✅ `labels`은 리스트로 유지
+    return cameras, radars, labels  # labels: list type
 
 
-# ✅ IoU 계산 함수 수정
+# IoU calculation
 def compute_iou(box1, box2):
     """
     box1, box2: [x1, y1, x2, y2]
@@ -277,7 +275,7 @@ def compute_iou(box1, box2):
     #print(f"Box1: {box1}, Box2: {box2}, IoU: {iou:.4f}")
     return iou
 
-# ✅ 좌표 변환 함수 추가
+# xywh to xyxy
 def xywh2xyxy(x):
     y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
     y[..., 0] = x[..., 0] - x[..., 2] / 2  # x_center → x1
@@ -286,7 +284,7 @@ def xywh2xyxy(x):
     y[..., 3] = x[..., 1] + x[..., 3] / 2  # y_center → y2
     return y
 
-# ✅ AP 계산 함수 수정
+# AP
 def compute_ap(precision, recall):
     recall = np.concatenate(([0.0], recall, [1.0]))
     precision = np.concatenate(([0.0], precision, [0.0]))
@@ -298,7 +296,7 @@ def compute_ap(precision, recall):
     ap = np.sum((recall[indices + 1] - recall[indices]) * precision[indices + 1])
     return ap
 
-# ✅ mAP 계산 함수 수정
+# mAP
 def compute_map(predictions, ground_truths, iou_threshold=0.5):
     aps = []
     for class_id in range(num_classes):
@@ -308,11 +306,8 @@ def compute_map(predictions, ground_truths, iou_threshold=0.5):
         if len(gt_boxes) == 0 or len(pred_boxes) == 0:
             continue
 
-        # ✅ IoU 계산을 위해 좌표 변환 수행
         gt_boxes = xywh2xyxy(np.array(gt_boxes))
         pred_boxes = xywh2xyxy(np.array(pred_boxes))
-
-        # ✅ Confidence 기준으로 정렬
         pred_boxes = sorted(pred_boxes, key=lambda x: x[-1], reverse=True)
 
         tp = np.zeros(len(pred_boxes))
@@ -334,14 +329,12 @@ def compute_map(predictions, ground_truths, iou_threshold=0.5):
             else:
                 fp[i] = 1
 
-        # ✅ Precision-Recall 계산
         tp_cumsum = np.cumsum(tp)
         fp_cumsum = np.cumsum(fp)
 
         recall = tp_cumsum / len(gt_boxes)
         precision = tp_cumsum / (tp_cumsum + fp_cumsum + 1e-6)
 
-        # ✅ AP 계산 및 추가
         ap = compute_ap(precision, recall)
         aps.append(ap)
 
@@ -370,7 +363,7 @@ class YOLOLoss(nn.Module):
         
         return total_loss, cls_loss, box_loss, obj_loss
 
-# ✅ 모델, 데이터 로더 설정
+# Load model, data
 num_classes = 7
 split_ratio = 0.7
 model = RadarCameraYOLO(num_classes=num_classes).to(device)
@@ -384,31 +377,31 @@ train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size,
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
 val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=1, collate_fn=yolo_collate_fn)
 
-# ✅ 학습 및 검증 루프
-num_epochs = 10
+# Train, val loop
+num_epochs = 5
 print("*************Training started!")
 
-# ✅ 손실 함수 및 최적화 설정
+# Loss function and optimization
 loss_fn = YOLOLoss(lambda_cls=1.0, lambda_box=1.0, lambda_obj=1.0)  
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
 
 for epoch in range(num_epochs):
-    # ✅ 모델 학습 모드 설정
+    # train mode on
     model.train()
     total_cls_loss, total_box_loss, total_obj_loss = 0, 0, 0
     
     for i, (camera, radar, labels) in enumerate(train_loader):
         camera, radar = camera.to(device), radar.to(device)
 
-        # ✅ 모델 출력 (class_output, bbox_output, obj_output)
+        # (class_output, bbox_output, obj_output)
         class_output, bbox_output, obj_output = model(camera, radar)
 
-        # ✅ Target 초기화
+        # Target initialization
         target_classes_map = torch.zeros((class_output.size(0), class_output.size(2), class_output.size(3))).long().to(device)
         target_bboxes_map = torch.zeros_like(bbox_output).to(device)
         target_obj_map = torch.zeros((obj_output.size(0), 1, obj_output.size(2), obj_output.size(3)), device=device)
 
-        # ✅ Label → Target 변환
+        # Label → Target 
         for b, label in enumerate(labels):
             for obj in label:
                 x_idx = int(obj[1] * class_output.size(2))
@@ -416,35 +409,32 @@ for epoch in range(num_epochs):
                 
                 target_classes_map[b, y_idx, x_idx] = int(obj[0])
                 target_bboxes_map[b, :, y_idx, x_idx] = obj[1:]
+                print(f"target_bboxes_map: {obj[1:]}")
                 target_obj_map[b, 0, y_idx, x_idx] = 1.0  # Target existence → 1
 
-        # ✅ 손실 계산
+        # Compute loss
         total_loss, cls_loss, box_loss, obj_loss = loss_fn(class_output, bbox_output, obj_output,
                                                            target_classes_map, target_bboxes_map, target_obj_map)
-
-        # ✅ 역전파 및 최적화
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
-
-        # ✅ 손실 값 집계
         total_cls_loss += cls_loss.item()
         total_box_loss += box_loss.item()
         total_obj_loss += obj_loss.item()
 
-        # ✅ 진행 상태 출력
+        # Print train loss
         if i % 5 == 0:
             print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i}/{len(train_loader)}], "
                   f"Class Loss: {cls_loss.item():.4f}, BBox Loss: {box_loss.item():.4f}, "
                   f"Objectness Loss: {obj_loss.item():.4f}, Total Loss: {total_loss.item():.4f}")
 
-    # ✅ 에폭 별 평균 손실 출력
-    print(f"✅ Epoch {epoch+1} Completed - "
+    # Averaged loss
+    print(f"Epoch {epoch+1} Completed - "
           f"Class Loss: {total_cls_loss/len(train_loader):.4f}, "
           f"BBox Loss: {total_box_loss/len(train_loader):.4f}, "
           f"Objectness Loss: {total_obj_loss/len(train_loader):.4f}")
 
-    # ✅ 모델 검증 모드 설정
+    # val mode on
     model.eval()
     total_cls_loss, total_box_loss, total_obj_loss = 0, 0, 0
     map50, map75 = [], []
@@ -452,16 +442,11 @@ for epoch in range(num_epochs):
     with torch.no_grad():
         for i, (camera, radar, labels) in enumerate(val_loader):
             camera, radar = camera.to(device), radar.to(device)
-
-            # ✅ 모델 출력
             class_output, bbox_output, obj_output = model(camera, radar)
-
-            # ✅ Target 초기화
             target_classes_map = torch.zeros((class_output.size(0), class_output.size(2), class_output.size(3))).long().to(device)
             target_bboxes_map = torch.zeros_like(bbox_output).to(device)
             target_obj_map = torch.zeros_like(obj_output).to(device)
 
-            # ✅ Label → Target 변환
             for b, label in enumerate(labels):
                 for obj in label:
                     x_idx = int(obj[1] * class_output.size(2))
@@ -471,16 +456,14 @@ for epoch in range(num_epochs):
                     target_bboxes_map[b, :, y_idx, x_idx] = obj[1:]
                     target_obj_map[b,0, y_idx, x_idx] = 1.0
 
-            # ✅ 손실 계산
+            # Compute loss
             total_loss, cls_loss, box_loss, obj_loss = loss_fn(class_output, bbox_output, obj_output,
                                                                target_classes_map, target_bboxes_map, target_obj_map)
 
-            # ✅ 손실 값 집계
             total_cls_loss += cls_loss.item()
             total_box_loss += box_loss.item()
             total_obj_loss += obj_loss.item()
 
-            # ✅ Confidence 계산
             class_prob = torch.softmax(class_output, dim=1)
             confidence, pred_classes = torch.max(class_prob, dim=1)
 
@@ -501,19 +484,19 @@ for epoch in range(num_epochs):
                             conf_scores[j]
                         ])
 
-            # ✅ mAP 계산 (IoU Threshold: 0.5, 0.75)
+            # Compute mAP (IoU Threshold: 0.5, 0.75)
             map50.append(compute_map(predictions, ground_truths, iou_threshold=0.5))
             map75.append(compute_map(predictions, ground_truths, iou_threshold=0.75))
 
-        # ✅ 검증 결과 출력
-        print(f"✅ Validation - Epoch {epoch+1}, "
+        # Print validation loss
+        print(f"Validation - Epoch {epoch+1}, "
               f"Class Loss: {total_cls_loss/len(val_loader):.4f}, "
               f"BBox Loss: {total_box_loss/len(val_loader):.4f}, "
               f"Objectness Loss: {total_obj_loss/len(val_loader):.4f}")
-        print(f"✅ Validation - mAP@50: {np.mean(map50):.4f}, mAP@75: {np.mean(map75):.4f}")
+        print(f"Validation - mAP@50: {np.mean(map50):.4f}, mAP@75: {np.mean(map75):.4f}")
 
-print("✅ Training Completed!")
+print("Training Completed!")
 save_path = "./trained_model.pth"
 torch.save(model.state_dict(), save_path)
-print(f"✅ Model saved to {save_path}")
+print(f"Model saved to {save_path}")
 
