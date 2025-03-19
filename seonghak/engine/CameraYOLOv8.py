@@ -66,7 +66,7 @@ class YOLOLoss(nn.Module):
         return total_loss / B, total_bbox_loss / B, total_obj_loss / B, total_class_loss / B
 
 # ✅ Training Function
-def train_model(model, dataloader, criterion, optimizer, num_epochs=10):
+def train_model(model, dataloader, criterion, optimizer, num_epochs):
     model.train()
     for epoch in range(num_epochs):
         epoch_loss, epoch_bbox_loss, epoch_obj_loss, epoch_class_loss = 0, 0, 0, 0
@@ -95,6 +95,13 @@ def train_model(model, dataloader, criterion, optimizer, num_epochs=10):
               f"Bbox Loss: {epoch_bbox_loss / total_samples:.4f}, "
               f"Obj Loss: {epoch_obj_loss / total_samples:.4f}, "
               f"Class Loss: {epoch_class_loss / total_samples:.4f}")
+        
+        # 🔥 10 Epoch마다 모델 저장 (output 폴더에 저장)
+        if (epoch + 1) % 10 == 0:
+            model.eval()
+            model_path = f"output/trained_model_epoch_{epoch+1}.pth"
+            torch.save(model.state_dict(), model_path)
+            print(f"✅ Model saved at epoch {epoch+1} in {model_path}")
 
 # ✅ Model & Dataset Setup
 device = torch.device("cpu")
@@ -116,10 +123,10 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # ✅ 학습 및 검증 루프
 print("🚀 Training Started!")
-train_model(model, train_loader, criterion, optimizer, num_epochs=10)
+train_model(model, train_loader, criterion, optimizer, num_epochs=50)
 print("✅ Training Completed!")
 
-# ✅ 학습 완료 후 모델 저장
-model.eval()  # 평가 모드로 변경
-torch.save(model.state_dict(), "trained_model.pth")
-print("✅ Model saved as trained_model.pth")
+# # ✅ 학습 완료 후 모델 저장
+# model.eval()  # 평가 모드로 변경
+# torch.save(model.state_dict(), "trained_model.pth")
+# print("✅ Model saved as trained_model.pth")
