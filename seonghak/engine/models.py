@@ -245,6 +245,35 @@ class ShuffleAttention(nn.Module):
         spatial_att = self.spatial_attention(x)
         return x * channel_att * spatial_att
     
+# ✅ Camera 전용 YOLO 모델
+class CameraYOLO(nn.Module):
+    def __init__(self, num_classes=7):
+        super(CameraYOLO, self).__init__()
+
+        # Camera Feature Extractor (CSP)
+        self.camera_stem = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.SiLU(),
+            CSPBlock(64, 128, num_layers=3)
+        )
+
+        # YOLO Backbone, Neck, Head
+        self.backbone = CSPDarknet()
+        self.neck = YOLOv8Neck()
+        self.head = YOLOv8Head(num_classes)
+
+    def forward(self, camera):
+        # Camera Feature Extraction
+        F_camera = self.camera_stem(camera)
+        
+        # YOLO Backbone
+        backbone_out = self.backbone(F_camera)
+        neck_out = self.neck(backbone_out)
+        results = self.head(neck_out)
+
+        return results
+    
 
 class RadarCameraYOLO(nn.Module):
     def __init__(self, num_classes=7):
@@ -346,24 +375,6 @@ class RadarCameraYOLO(nn.Module):
 
         return results
     
-
-# ✅ Dynamic Collate Function (YOLO 바운딩 박스 개수 다름 문제 해결)
-def yolo_collate_fn(batch):
-    cameras = []
-    radars = []
-    labels = []
-
-    for camera, radar, label in batch:
-        cameras.append(camera)
-        radars.append(radar)
-        labels.append(label)  # ✅ 리스트로 유지 (Tensor 변환 X)
-
-    # ✅ 이미지 및 레이더 데이터를 스택
-    cameras = torch.stack(cameras, dim=0)
-    radars = torch.stack(radars, dim=0)
-
-    return cameras, radars, labels  # ✅ `labels`은 리스트로 유지
-
 
 ### Achelous3T ###
 

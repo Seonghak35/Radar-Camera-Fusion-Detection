@@ -90,3 +90,59 @@ def non_max_suppression(prediction, num_classes, input_shape, image_shape, lette
             output[i][:, :4]    = yolo_correct_boxes(box_xy, box_wh, input_shape, image_shape, letterbox_image)
 
     return output
+
+
+# ✅ Dynamic Collate Function (YOLO 바운딩 박스 개수 다름 문제 해결)
+def yolo_collate_fn(batch):
+    cameras = []
+    radars = []
+    labels = []
+
+    for camera, radar, label in batch:
+        cameras.append(camera)
+        radars.append(radar)
+        labels.append(label)  # ✅ 리스트로 유지 (Tensor 변환 X)
+
+    # ✅ 이미지 및 레이더 데이터를 스택
+    cameras = torch.stack(cameras, dim=0)
+    radars = torch.stack(radars, dim=0)
+
+    return cameras, radars, labels  # ✅ `labels`은 리스트로 유지
+
+
+def bbox_iou(box1, box2):
+    """Compute IoU between two sets of bounding boxes in a batched way."""
+
+    box1 = torch.tensor(box1, dtype=torch.float32)  # numpy → torch 변환
+    box2 = torch.tensor(box2, dtype=torch.float32)  # numpy → torch 변환
+    
+    N = box1.shape[0]  # predicted objects
+    M = box2.shape[0]  # real objects
+
+    # (N, 1) → (N, M) 으로 확장 / (1, M) → (N, M) 으로 확장
+    box1_x1 = (box1[:, 0] - box1[:, 2] / 2).unsqueeze(1).expand(N, M)
+    box1_y1 = (box1[:, 1] - box1[:, 3] / 2).unsqueeze(1).expand(N, M)
+    box1_x2 = (box1[:, 0] + box1[:, 2] / 2).unsqueeze(1).expand(N, M)
+    box1_y2 = (box1[:, 1] + box1[:, 3] / 2).unsqueeze(1).expand(N, M)
+
+    box2_x1 = (box2[:, 0] - box2[:, 2] / 2).unsqueeze(0).expand(N, M)
+    box2_y1 = (box2[:, 1] - box2[:, 3] / 2).unsqueeze(0).expand(N, M)
+    box2_x2 = (box2[:, 0] + box2[:, 2] / 2).unsqueeze(0).expand(N, M)
+    box2_y2 = (box2[:, 1] + box2[:, 3] / 2).unsqueeze(0).expand(N, M)
+
+    # 교차 영역 (Intersection)
+    inter_x1 = torch.max(box1_x1, box2_x1)
+    inter_y1 = torch.max(box1_y1, box2_y1)
+    inter_x2 = torch.min(box1_x2, box2_x2)
+    inter_y2 = torch.min(box1_y2, box2_y2)
+
+    inter_area = (inter_x2 - inter_x1).clamp(0) * (inter_y2 - inter_y1).clamp(0)
+
+    # 개별 박스 영역 (Union)
+    box1_area = (box1_x2 - box1_x1) * (box1_y2 - box1_y1)
+    box2_area = (box2_x2 - box2_x1) * (box2_y2 - box2_y1)
+
+    union_area = box1_area + box2_area - inter_area
+
+    return inter_area / (union_area + 1e-6)  # (N, M) 형태의 IoU 행렬 반환
+

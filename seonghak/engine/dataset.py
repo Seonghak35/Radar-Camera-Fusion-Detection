@@ -7,7 +7,7 @@ import torchvision.transforms as transforms
 
 from torch.utils.data import DataLoader, Dataset
 from PIL import Image
-from .utils import preprocess_input_radar, preprocess_input, cvtColor, resize_image
+from utils import preprocess_input_radar, preprocess_input, cvtColor, resize_image
 
 RESOLUTION = 160
 
@@ -47,12 +47,13 @@ class RadarCameraYoloDataset(Dataset):
         # 파일명 가져오기 (확장자 제외)
         file_name = os.path.splitext(self.image_files[idx])[0]
 
-        # 1️⃣ 이미지 불러오기 (RGB)
+        # 1️⃣ 이미지 불러오기 (RGB), referring to "Achelous"
         image_path = os.path.join(self.image_dir, file_name + ".jpg")
         image = Image.open(image_path)
         image_shape = np.array(np.shape(image)[0:2])
         image = cvtColor(image)
         image_data = resize_image(image, (self.input_shape[1], self.input_shape[0]), self.letterbox_image)
+        # image_data = np.expand_dims(np.transpose(preprocess_input(np.array(image_data, dtype='float32')), (2, 0, 1)), 0)
         image_data = np.transpose(preprocess_input(np.array(image_data, dtype='float32')), (2, 0, 1))  # (3, H, W)
         image_data = torch.tensor(image_data, dtype=torch.float32)
 
@@ -60,11 +61,11 @@ class RadarCameraYoloDataset(Dataset):
         # image = Image.open(image_path).convert("RGB")
         # image = self.transform(image)  # (3, H, W)
 
-        # 2️⃣ 레이더 REVP 데이터 불러오기 (.npz)          
+        # 2️⃣ 레이더 REVP 데이터 불러오기 (.npz), referring to "Achelous"
         radar_path = os.path.join(self.radar_dir, file_name + ".npz")
         radar_data = np.load(radar_path)['arr_0']  # (4, H, W) → REVP 맵
-        radar_data = preprocess_input_radar(radar_data)
         # radar_data = torch.from_numpy(preprocess_input_radar(radar_data)).type(torch.FloatTensor).unsqueeze(0)
+        radar_data = preprocess_input_radar(radar_data)
         radar_data = torch.tensor(radar_data, dtype=torch.float32)
 
         ## previous version ##
