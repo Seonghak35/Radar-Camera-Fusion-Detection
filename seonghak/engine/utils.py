@@ -110,6 +110,20 @@ def yolo_collate_fn(batch):
     return cameras, radars, labels  # ✅ `labels`은 리스트로 유지
 
 
+def coco_collate_fn(batch):
+    cameras = []
+    labels = []
+
+    for camera, label in batch:
+        cameras.append(camera)
+        labels.append(label)  # ✅ 리스트로 유지 (Tensor 변환 X)
+
+    # ✅ 이미지 및 레이더 데이터를 스택
+    cameras = torch.stack(cameras, dim=0)
+
+    return cameras, labels  # ✅ `labels`은 리스트로 유지
+
+
 def bbox_iou(box1, box2):
     """Compute IoU between two sets of bounding boxes in a batched way."""
 
