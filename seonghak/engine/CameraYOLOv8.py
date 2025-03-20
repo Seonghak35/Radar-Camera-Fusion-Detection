@@ -83,18 +83,19 @@ def train_model(model, dataloader, criterion, optimizer, num_epochs, start_epoch
 
 # ✅ Model & Dataset Setup
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-num_classes = 80
+num_classes = 7
 split_ratio = 0.2
 
 model = CameraYOLO(num_classes=num_classes).to(device)
-# dataset = RadarCameraYoloDataset(data_root="../../WaterScenes/dataset/")
-dataset = CoCoYoloDataset(data_root="../data/coco/", input_shape=(160, 120))
+dataset = RadarCameraYoloDataset(data_root="../../WaterScenes/dataset/")
+# dataset = CoCoYoloDataset(data_root="../data/coco/", input_shape=(160, 120))
 
 train_size = int(split_ratio * len(dataset))
 val_size = len(dataset) - train_size
 train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
-train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=1, collate_fn=coco_collate_fn)
+train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=1, collate_fn=yolo_collate_fn)
+# train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=1, collate_fn=coco_collate_fn)
 # val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=1, collate_fn=yolo_collate_fn)
 
 learning_rate = 5e-4
